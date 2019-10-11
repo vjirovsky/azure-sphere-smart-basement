@@ -1,0 +1,19 @@
+{
+  "SchemaVersion": 1,
+  "Name": "AzureSphereSecuredBasement",
+  "ComponentId": "685f13af-25a5-40b2-8dd8-8cbc253ecbd8",
+  "EntryPoint": "/bin/app",
+  "CmdArgs": [ "--SCOPE-ID--" ],
+  "Capabilities": {
+    "Adc": [ "$AVNET_MT3620_SK_ADC_CONTROLLER0" ],
+    "AllowedConnections": [
+      "--YOUR-IOT-HUB-URL--",
+      "global.azure-devices-provisioning.net"
+    ],
+    "DeviceAuthentication": "--DEVICE-AUTHENTICATION--",
+    "Gpio": [ "$AVNET_MT3620_SK_USER_LED_RED", "$AVNET_MT3620_SK_USER_LED_GREEN", "$AVNET_MT3620_SK_USER_LED_BLUE", "$AVNET_MT3620_SK_USER_BUTTON_A", "$AVNET_MT3620_SK_GPIO34" ],
+    "I2cMaster": [ "$AVNET_MT3620_SK_ISU2_I2C" ],
+    "SpiMaster": [],
+    "WifiConfig": true
+  }
+}
