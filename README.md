@@ -49,13 +49,13 @@ All projects are set up for AVNET MT3620 Starter Kit, but with few changes can b
     `IotHubConnectionString` - token from previous step<br>
     `TELEGRAM_BOT_TOKEN` - your Telegram bot token from step 1<br>
     `TELEGRAM_CHAT_ID` - your Telegram chatId ([how to get chat ID](https://answers.splunk.com/answers/590658/telegram-alert-action-where-do-you-get-a-chat-id.html))
-1. deploy `AzureSphereSmartBasementFunctionApp` to Azure
+1. deploy `AzureSphereSmartBasementFunctionApp` to Azure (create new Azure Function & deploy it)
 
 1. generate IoT Hub service token (IoT Hub -> Shared access policies -> service -> connection string (primary key))
 1. create `./cloud-backend/SmartBasementBot/appsettings.json` (use .template in same folder) and fill in:
 
     `IoTHub:ConnectionString` - token from previous step<br>
     `IoTHub:DeviceId` - Device ID (same as in DeviceAuthentication in app_manifest)<br>
-1. deploy `SmartBasementBot` to Azure
+1. deploy `SmartBasementBot` to Azure (create new Microsoft Bot Web & deploy it)
 1. write message `/start` to Telegram bot
 1. enjoy!
