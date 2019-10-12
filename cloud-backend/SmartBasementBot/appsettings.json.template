@@ -1,0 +1,8 @@
+{
+  "MicrosoftAppId": "",
+  "MicrosoftAppPassword": "",
+  "IoTHub": {
+    "ConnectionString": "---IOT-HUB-SERVICE-ENDPOINT-URL-STARTING-WITH-HostName=",
+    "DeviceId": "---DEVICE-ID-IN-IOT-HUB---"
+  }
+}
