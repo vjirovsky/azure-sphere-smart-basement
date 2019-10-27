@@ -66,6 +66,7 @@
     <ClInclude Include="iothub_helper.h" />
     <ClInclude Include="led_helper.h" />
     <ClInclude Include="lsm6dso_reg.h" />
+    <ClInclude Include="main.h" />
     <ClInclude Include="mt3620_avnet_dev.h" />
     <ClInclude Include="parson.h" />
   </ItemGroup>

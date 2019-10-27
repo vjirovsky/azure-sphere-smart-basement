@@ -1,4 +1,5 @@
-﻿#include <errno.h>
+﻿#include "main.h"
+#include <errno.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -19,7 +20,6 @@
 #include "applibs_versions.h"
 #include "epoll_timerfd_utilities.h"
 
-#include "connection_strings.h"
 #include "build_options.h"
 
 #include <applibs/adc.h>
@@ -35,42 +35,34 @@
 char scopeId[SCOPEID_LENGTH]; // ScopeId for the Azure IoT Central application, set in
 									 // app_manifest.json, CmdArgs
 
-
+//epoll timer for reading sensors
 int g_read_sensors_timer_fd = -1;
 
+//epoll timer for checking button A
 extern int g_button_a_timer_fd;
+
+//FD for GPIO of Button A
 extern int g_button_a_gpio_fd;
 
+//epoll timer for syncing with IoT Hub
 extern int g_azure_iot_sync_timer_fd;
+
+//FD for ADC0
 extern int g_adc0_controller_fd;
 
 extern IOTHUB_DEVICE_CLIENT_LL_HANDLE iothubClientHandle;
 
-bool iothubAuthenticated = false;
-extern int azureIoTPollPeriodSeconds;
-extern const int AzureIoTDefaultPollPeriodSeconds;
+bool g_is_iothub_authenticated = false;
+extern int g_iot_hub_current_poll_period_seconds;
+extern const int g_iot_hub_default_poll_period_seconds;
 
-// Support functions.
-static void ExitApplication();
-static int InitPeripheralsAndHandlers(void);
-static void ClosePeripheralsAndHandlers(void);
-
-// File descriptors - initialized to invalid value
+// epoll timer FD instance 
 int epollFd = -1;
 
 lsm6dso_ctx_t dev_ctx;
 
 
-// previous states acceleration, angular rate, ambient light
-float g_previous_acceleration_mg[3];
-bool g_is_previous_acceleration_set = false;
-float g_previous_angular_rate_dps[3];
-bool g_is_previous_angular_rate_set = false;
-float g_previous_ambient;
-bool g_is_previous_ambient_set = false;
-float g_previous_microphone;
-bool g_is_previous_microphone_set = false;
-
+sensors_state g_previous_state = {false, false, false, false};
 
 // Application state
 volatile sig_atomic_t g_is_app_exit_requested = false;
@@ -88,8 +80,6 @@ extern int g_microphone_sample_bit_count;
 
 //calibration data for angular sensor
 axis3bit16_t g_raw_angular_rate_calibration;
-
-extern void AzureTimerEventHandler(EventData* eventData);
 
 /// <summary>
 /// This will exit application
@@ -121,21 +111,24 @@ void GetAndProcessDataFromSensors(EventData* eventData)
 
 	if (!g_is_armed) {
 		setNewLEDStateRGB(false, false, false);
+
+		//there is no reason to read data from sensors - alarm is not armed
 		return;
 	}
 
+	// set up LED to constant blue
 	setNewLEDStateRGB(false, false, true);
 
 
-	//acceleration sensor
+	//read data from acceleration sensor
 
 	lsm6dso_xl_flag_data_ready_get(&dev_ctx, &reg);
 	float absolute_accel = 0;
 	if (reg)
 	{
-		g_previous_acceleration_mg[0] = g_acceleration_mg[0];
-		g_previous_acceleration_mg[1] = g_acceleration_mg[1];
-		g_previous_acceleration_mg[2] = g_acceleration_mg[2];
+		g_previous_state.acceleration_mg[0] = g_acceleration_mg[0];
+		g_previous_state.acceleration_mg[1] = g_acceleration_mg[1];
+		g_previous_state.acceleration_mg[2] = g_acceleration_mg[2];
 		// Read acceleration field data
 		memset(g_data_raw_acceleration.u8bit, 0x00, 3 * sizeof(int16_t));
 		lsm6dso_acceleration_raw_get(&dev_ctx, g_data_raw_acceleration.u8bit);
@@ -144,23 +137,23 @@ void GetAndProcessDataFromSensors(EventData* eventData)
 		g_acceleration_mg[1] = lsm6dso_from_fs4_to_mg(g_data_raw_acceleration.i16bit[1]);
 		g_acceleration_mg[2] = lsm6dso_from_fs4_to_mg(g_data_raw_acceleration.i16bit[2]);
 
-		absolute_accel = sqrt(pow(g_previous_acceleration_mg[0] - g_acceleration_mg[0], 2) + pow(g_previous_acceleration_mg[1] - g_acceleration_mg[1], 2) + pow(g_previous_acceleration_mg[2] - g_acceleration_mg[2], 2));
+		absolute_accel = sqrt(pow(g_previous_state.acceleration_mg[0] - g_acceleration_mg[0], 2) + pow(g_previous_state.acceleration_mg[1] - g_acceleration_mg[1], 2) + pow(g_previous_state.acceleration_mg[2] - g_acceleration_mg[2], 2));
 		Log_Debug("Acceleration difference: %.4lf\n", absolute_accel);
-		if (absolute_accel > ABSOLUTE_ACCELERATION_THRESHOLD && g_is_previous_acceleration_set) {
+		if (absolute_accel > ABSOLUTE_ACCELERATION_THRESHOLD && g_previous_state.is_acceleration_set) {
 			g_is_breach_detected = true;
 		}
-		g_is_previous_acceleration_set = true;
+		g_previous_state.is_acceleration_set = true;
 	}
 
-	//angular rate sensor
+	//read data from angular rate sensor
 
 	float absolute_angular = 0;
 	lsm6dso_gy_flag_data_ready_get(&dev_ctx, &reg);
 	if (reg)
 	{
-		g_previous_angular_rate_dps[0] = g_angular_rate_dps[0];
-		g_previous_angular_rate_dps[1] = g_angular_rate_dps[1];
-		g_previous_angular_rate_dps[2] = g_angular_rate_dps[2];
+		g_previous_state.angular_rate_dps[0] = g_angular_rate_dps[0];
+		g_previous_state.angular_rate_dps[1] = g_angular_rate_dps[1];
+		g_previous_state.angular_rate_dps[2] = g_angular_rate_dps[2];
 		// Read angular rate field data
 		memset(g_data_raw_angular_rate.u8bit, 0x00, 3 * sizeof(int16_t));
 		lsm6dso_angular_rate_raw_get(&dev_ctx, g_data_raw_angular_rate.u8bit);
@@ -171,17 +164,17 @@ void GetAndProcessDataFromSensors(EventData* eventData)
 		g_angular_rate_dps[2] = (lsm6dso_from_fs2000_to_mdps(g_data_raw_angular_rate.i16bit[2] - g_raw_angular_rate_calibration.i16bit[2])) / 1000.0;
 
 		Log_Debug("Angular rate [dps] : %4.2f, %4.2f, %4.2f\n", g_angular_rate_dps[0], g_angular_rate_dps[1], g_angular_rate_dps[2]);
-		absolute_angular = sqrt(pow(g_previous_angular_rate_dps[0] - g_angular_rate_dps[0], 2) + pow(g_previous_angular_rate_dps[1] - g_angular_rate_dps[1], 2) + pow(g_previous_angular_rate_dps[2] - g_angular_rate_dps[2], 2));
+		absolute_angular = sqrt(pow(g_previous_state.angular_rate_dps[0] - g_angular_rate_dps[0], 2) + pow(g_previous_state.angular_rate_dps[1] - g_angular_rate_dps[1], 2) + pow(g_previous_state.angular_rate_dps[2] - g_angular_rate_dps[2], 2));
 		Log_Debug("Angular rate difference: %.4lf\n", absolute_angular);
-		if (absolute_angular > ABSOLUTE_ANGULAR_THRESHOLD && g_is_previous_angular_rate_set) {
+		if (absolute_angular > ABSOLUTE_ANGULAR_THRESHOLD && g_previous_state.is_angular_rate_set) {
 			g_is_breach_detected = true;
 		}
 
-		g_is_previous_angular_rate_set = true;
+		g_previous_state.is_angular_rate_set = true;
 	}
 
 
-	//ambient light sensor
+	//read data from ambient light sensor
 
 	uint32_t ambient_value;
 	float absolute_ambient = 0;
@@ -194,20 +187,20 @@ void GetAndProcessDataFromSensors(EventData* eventData)
 	else {
 		float voltage = (((float)ambient_value * ALS_PT19_MAX_VOLTAGE) / (float)((1 << g_ambient_sample_bit_count) - 1));
 
-		Log_Debug("Voltage on ambient sensor: %.10f (was %.10f)\n", voltage, g_previous_ambient);
-		absolute_ambient = abs((g_previous_ambient-voltage)*1000);
+		Log_Debug("Voltage on ambient sensor: %.10f (was %.10f)\n", voltage, g_previous_state.ambient);
+		absolute_ambient = abs((g_previous_state.ambient -voltage)*1000);
 		Log_Debug("Ambient difference: %4.2f\n", absolute_ambient);
 
-		g_previous_ambient = voltage;
+		g_previous_state.ambient = voltage;
 
-		if (absolute_ambient > ABSOLUTE_AMBIENT_THRESHOLD && g_is_previous_ambient_set) {
+		if (absolute_ambient > ABSOLUTE_AMBIENT_THRESHOLD && g_previous_state.is_ambient_set) {
 			g_is_breach_detected = true;
 		}
 
-		g_is_previous_ambient_set = true;
+		g_previous_state.is_ambient_set = true;
 	}
 
-	//microphone
+	//read data from microphone
 
 	uint32_t microphone_value;
 	float absolute_microphone = 0;
@@ -221,16 +214,16 @@ void GetAndProcessDataFromSensors(EventData* eventData)
 		float voltage = (((float)microphone_value * MICROPHONE_MAX_VOLTAGE) / (float)((1 << g_microphone_sample_bit_count) - 1));
 
 		Log_Debug("Voltage on microphone: %.10f\n", voltage);
-		absolute_microphone = abs((g_previous_microphone - voltage) * 1000);
+		absolute_microphone = abs((g_previous_state.microphone - voltage) * 1000);
 		Log_Debug("Microphone difference: %4.2f\n", absolute_microphone);
 
-		g_previous_microphone = voltage;
+		g_previous_state.microphone = voltage;
 
-		if (absolute_microphone > ABSOLUTE_MICROPHONE_THRESHOLD && g_is_previous_microphone_set) {
+		if (absolute_microphone > ABSOLUTE_MICROPHONE_THRESHOLD && g_previous_state.is_microphone_set) {
 			g_is_breach_detected = true;
 		}
 
-		g_is_previous_microphone_set = true;
+		g_previous_state.is_microphone_set = true;
 	}
 
 
@@ -290,8 +283,8 @@ int InitPeripheralsAndHandlers(void)
 		return -1;
 	}
 
-	azureIoTPollPeriodSeconds = AzureIoTDefaultPollPeriodSeconds;
-	struct timespec azureTelemetryPeriod = { azureIoTPollPeriodSeconds, 0 };
+	g_iot_hub_current_poll_period_seconds = g_iot_hub_default_poll_period_seconds;
+	struct timespec azureTelemetryPeriod = { g_iot_hub_current_poll_period_seconds, 0 };
 
 	g_azure_iot_sync_timer_fd = CreateTimerFdAndAddToEpoll(epollFd, &azureTelemetryPeriod, &azureEventData, EPOLLIN);
 	if (g_azure_iot_sync_timer_fd < 0) {
@@ -335,6 +328,7 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	// if init of some peripheral failed, exit app
 	if (InitPeripheralsAndHandlers() != 0) {
 		ExitApplication();
 	}

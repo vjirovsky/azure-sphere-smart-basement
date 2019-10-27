@@ -24,23 +24,20 @@ IOTHUB_DEVICE_CLIENT_LL_HANDLE iothubClientHandle = NULL;
 extern char scopeId[SCOPEID_LENGTH]; // ScopeId for the Azure IoT Central application, set in
 									 // app_manifest.json, CmdArgs
 
-extern bool iothubAuthenticated;
+extern bool g_is_iothub_authenticated;
 extern sig_atomic_t g_is_app_exit_requested;
 extern bool g_is_wifi_connected;
 extern bool g_is_breach_detected;
 extern bool g_is_armed;
-extern bool g_is_previous_acceleration_set;
-extern bool g_is_previous_angular_rate_set;
-extern bool g_is_previous_ambient_set;
-extern bool g_is_previous_microphone_set;
+extern sensors_state g_previous_state;
 
 // Azure IoT poll periods
-const int AzureIoTDefaultPollPeriodSeconds = 5;
+const int g_iot_hub_default_poll_period_seconds = 5;
 const int AzureIoTMinReconnectPeriodSeconds = 60;
 const int AzureIoTMaxReconnectPeriodSeconds = 10 * 60;
 
 const int keepalivePeriodSeconds = 20;
-int azureIoTPollPeriodSeconds = -1;
+int g_iot_hub_current_poll_period_seconds = -1;
 
 int g_azure_iot_sync_timer_fd = -1;
 
@@ -67,30 +64,30 @@ void SetupAzureClient(void)
 		// If we fail to connect, reduce the polling frequency, starting at
 		// AzureIoTMinReconnectPeriodSeconds and with a backoff up to
 		// AzureIoTMaxReconnectPeriodSeconds
-		if (azureIoTPollPeriodSeconds == AzureIoTDefaultPollPeriodSeconds) {
-			azureIoTPollPeriodSeconds = AzureIoTMinReconnectPeriodSeconds;
+		if (g_iot_hub_current_poll_period_seconds == g_iot_hub_default_poll_period_seconds) {
+			g_iot_hub_current_poll_period_seconds = AzureIoTMinReconnectPeriodSeconds;
 		}
 		else {
-			azureIoTPollPeriodSeconds *= 2;
-			if (azureIoTPollPeriodSeconds > AzureIoTMaxReconnectPeriodSeconds) {
-				azureIoTPollPeriodSeconds = AzureIoTMaxReconnectPeriodSeconds;
+			g_iot_hub_current_poll_period_seconds *= 2;
+			if (g_iot_hub_current_poll_period_seconds > AzureIoTMaxReconnectPeriodSeconds) {
+				g_iot_hub_current_poll_period_seconds = AzureIoTMaxReconnectPeriodSeconds;
 			}
 		}
 
-		struct timespec azureTelemetryPeriod = { azureIoTPollPeriodSeconds, 0 };
+		struct timespec azureTelemetryPeriod = { g_iot_hub_current_poll_period_seconds, 0 };
 		SetTimerFdToPeriod(g_azure_iot_sync_timer_fd, &azureTelemetryPeriod);
 
 		Log_Debug("ERROR: failure to create IoTHub Handle - will retry in %i seconds.\n",
-			azureIoTPollPeriodSeconds);
+			g_iot_hub_current_poll_period_seconds);
 		return;
 	}
 
 	// Successfully connected, so make sure the polling frequency is back to the default
-	azureIoTPollPeriodSeconds = AzureIoTDefaultPollPeriodSeconds;
-	struct timespec azureTelemetryPeriod = { azureIoTPollPeriodSeconds, 0 };
+	g_iot_hub_current_poll_period_seconds = g_iot_hub_default_poll_period_seconds;
+	struct timespec azureTelemetryPeriod = { g_iot_hub_current_poll_period_seconds, 0 };
 	SetTimerFdToPeriod(g_azure_iot_sync_timer_fd, &azureTelemetryPeriod);
 
-	iothubAuthenticated = true;
+	g_is_iothub_authenticated = true;
 
 	if (IoTHubDeviceClient_LL_SetOption(iothubClientHandle, OPTION_KEEP_ALIVE,
 		&keepalivePeriodSeconds) != IOTHUB_CLIENT_OK) {
@@ -110,8 +107,8 @@ void HubConnectionStatusCallback(IOTHUB_CLIENT_CONNECTION_STATUS result,
 	IOTHUB_CLIENT_CONNECTION_STATUS_REASON reason,
 	void* userContextCallback)
 {
-	iothubAuthenticated = (result == IOTHUB_CLIENT_CONNECTION_AUTHENTICATED);
-	if (!iothubAuthenticated) {
+	g_is_iothub_authenticated = (result == IOTHUB_CLIENT_CONNECTION_AUTHENTICATED);
+	if (!g_is_iothub_authenticated) {
 		Log_Debug("IoT Hub Authenticated: %s\n", GetReasonString(reason));
 	}
 }
@@ -127,11 +124,11 @@ void AzureTimerEventHandler(EventData* eventData)
 		return;
 	}
 
-	if (g_is_wifi_connected && !iothubAuthenticated) {
+	if (g_is_wifi_connected && !g_is_iothub_authenticated) {
 		SetupAzureClient();
 	}
 
-	if (iothubAuthenticated) {
+	if (g_is_iothub_authenticated) {
 		IoTHubDeviceClient_LL_DoWork(iothubClientHandle);
 	}
 }
@@ -286,10 +283,10 @@ IOTHUBMESSAGE_DISPOSITION_RESULT ReceiveMessageCallback(IOTHUB_MESSAGE_HANDLE me
 		g_is_breach_detected = false;
 
 		//reset previous values from sensor
-		g_is_previous_acceleration_set = false;
-		g_is_previous_angular_rate_set = false;
-		g_is_previous_ambient_set = false;
-		g_is_previous_microphone_set = false;
+		g_previous_state.is_acceleration_set = false;
+		g_previous_state.is_angular_rate_set = false;
+		g_previous_state.is_ambient_set = false;
+		g_previous_state.is_microphone_set = false;
 
 		//turn on armed state
 		g_is_armed = true;

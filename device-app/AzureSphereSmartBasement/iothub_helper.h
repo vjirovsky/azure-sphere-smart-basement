@@ -4,6 +4,7 @@
 #include "build_options.h"
 #include <stdbool.h>
 #include <azureiot\iothub_client_options.h>
+#include "general_helper.h"
 
 void SetupAzureClient(void);
 void HubConnectionStatusCallback(IOTHUB_CLIENT_CONNECTION_STATUS result, IOTHUB_CLIENT_CONNECTION_STATUS_REASON reason, void* userContextCallback);

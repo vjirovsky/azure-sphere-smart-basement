@@ -24,10 +24,8 @@ extern sig_atomic_t g_is_app_exit_requested;
 extern bool g_is_armed;
 extern bool g_is_breach_detected;
 
-extern bool g_is_previous_acceleration_set;
-extern bool g_is_previous_angular_rate_set;
-extern bool g_is_previous_ambient_set;
-extern bool g_is_previous_microphone_set;
+
+extern sensors_state g_previous_state;
 
 // Button state variables, initilize them to button not-pressed (High)
 static GPIO_Value_Type buttonAState = GPIO_Value_High;
@@ -100,10 +98,10 @@ extern void ButtonATimerEventHandler(EventData* eventData)
 		g_is_breach_detected = false;
 
 		//reset previous values from sensor
-		g_is_previous_acceleration_set = false;
-		g_is_previous_angular_rate_set = false;
-		g_is_previous_ambient_set = false;
-		g_is_previous_microphone_set = false;
+		g_previous_state.is_acceleration_set = false;
+		g_previous_state.is_angular_rate_set = false;
+		g_previous_state.is_ambient_set = false;
+		g_previous_state.is_microphone_set = false;
 
 		//turn on armed state
 		g_is_armed = true;
